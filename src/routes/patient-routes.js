@@ -1,12 +1,12 @@
-const express=require('express')
+const express = require("express");
 
-const route=express.Router()
-const PatientController=require('../controller/patient-controller')
+const route = express.Router();
+const PatientController = require("../controller/patient-controller");
 
-route.post('/addPatient', PatientController.addPatient);
+route.post("/addPatient", PatientController.addPatient);
 
-route.put('/:phone', PatientController.editPatient);
+route.put("/", PatientController.editPatient);
 
-route.get('/listPatient', PatientController.listPatient);
+route.get("/listPatient", PatientController.listPatient);
 
-module.exports = route
+module.exports = route;
