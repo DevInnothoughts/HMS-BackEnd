@@ -1,114 +1,143 @@
 const ApiResponse = require("../utils/api-response");
-const patientDb = require("../database/patientDb");
-const diagnosisDb = require("../database/diagnosisDb");
-const surgeryDetailsDb = require("../database/surgeryDetailsDb");
-const followUpDb = require("../database/followUpDb");
+// Removed MongoDB/Mongoose database imports
 
-async function listFollowUp(patient_id) {
+/**
+ * Helper function to execute a MySQL query directly on the pool.
+ * @param {object} pool - MySQL connection pool instance.
+ * @param {string} sql - SQL query string.
+ * @param {Array<any>} params - Query parameters.
+ * @returns {Promise<Array<object>>} - Query results (rows).
+ */
+async function executePoolQuery(pool, sql, params = []) {
+    const [rows] = await pool.query(sql, params);
+    return rows;
+}
+
+/**
+ * 1. List Follow-Up Data for a single patient (Converted to MySQL)
+ */
+async function listFollowUp(pool, patient_id) {
   try {
-    const patientData = await patientDb.findOne({ patient_id });
-
-    const diagnosisData = await diagnosisDb.find({ patient_id });
-
-    const followUpData = await followUpDb.findOne({ patient_id });
+    // 1. Fetch patient details
+    const patientSql = `SELECT * FROM patient WHERE patient_id = ? LIMIT 1`;
+    const [patientData] = await executePoolQuery(pool, patientSql, [patient_id]);
+    
+    // 2. Fetch diagnosis data
+    // Assuming diagnosis is one-to-many, so we list all
+    const diagnosisSql = `SELECT * FROM diagnosis WHERE patient_id = ? AND (is_deleted IS NULL OR is_deleted != 1)`;
+    const diagnosisData = await executePoolQuery(pool, diagnosisSql, [patient_id]);
+    
+    // 3. Fetch latest follow-up data
+    // Assuming follow_up is typically one-to-one or we fetch the most recent
+    const followUpSql = `SELECT * FROM follow_up WHERE patient_id = ? ORDER BY follow_up_id DESC LIMIT 1`;
+    const [followUpData] = await executePoolQuery(pool, followUpSql, [patient_id]);
 
     return new ApiResponse(
       200,
-      "Patient and medication history fetched successfully.",
+      "Patient and follow-up history fetched successfully.",
       null,
-      { patientData, diagnosisData, followUpData },
+      { patientData: patientData, diagnosisData, followUpData },
     );
   } catch (error) {
-    console.log("Error while fetching followUp data: ", error.message);
+    console.error("Error while fetching followUp data: ", error.message);
     throw new Error("Unable to fetch followUp data.");
   }
 }
 
-async function followUp(patient_id, updatedFollowUpData) {
+/**
+ * 2. Update Follow-Up Data, Patient Details, and Diagnosis (Converted to MySQL)
+ */
+async function followUp(pool, patient_id, updatedFollowUpData) {
   try {
-    console.log(
-      "Service received request to update followup for patient_id:",
+    console.log("Service received request to update follow up for patient_id:", patient_id);
+
+    // --- 1. Update follow_up table (Check existence/Insert on duplicate key) ---
+    // We assume followUpData holds data from the last record if one exists,
+    // and we update that last record, or insert if none exists.
+    
+    // Find the latest follow-up record to use existing data if fields are missing in payload
+    const followUpSql = `SELECT * FROM follow_up WHERE patient_id = ? ORDER BY follow_up_id DESC LIMIT 1`;
+    const [existingFollowUp] = await executePoolQuery(pool, followUpSql, [patient_id]);
+
+    if (!existingFollowUp) {
+         // Insert initial follow up record
+         const insertFollowUpSql = `INSERT INTO follow_up (patient_id, advice, adviceComment, diagnosis) VALUES (?, ?, ?, ?)`;
+         const insertFollowUpParams = [patient_id, updatedFollowUpData.advice || null, updatedFollowUpData.adviceComment || null, updatedFollowUpData.diagnosis || null];
+         await pool.query(insertFollowUpSql, insertFollowUpParams);
+    } else {
+        // Update existing follow up record
+        const updateFollowUpSql = `
+            UPDATE follow_up SET 
+                advice = ?, 
+                adviceComment = ?, 
+                diagnosis = ?
+            WHERE follow_up_id = ?
+            LIMIT 1
+        `;
+        const updateFollowUpParams = [
+            updatedFollowUpData.advice || existingFollowUp.advice,
+            updatedFollowUpData.adviceComment || existingFollowUp.adviceComment,
+            updatedFollowUpData.diagnosis || existingFollowUp.diagnosis,
+            existingFollowUp.follow_up_id 
+        ];
+        await pool.query(updateFollowUpSql, updateFollowUpParams);
+    }
+
+    // --- 2. Update patient table ---
+    const updatePatientSql = `
+      UPDATE patient
+      SET 
+        Uid_no = ?,
+        age = ?,
+        phone = ?
+      WHERE patient_id = ?
+      LIMIT 1
+    `;
+    const updatePatientParams = [
+      updatedFollowUpData.Uid_no,
+      updatedFollowUpData.age,
+      updatedFollowUpData.phone,
       patient_id,
-    );
+    ];
+    const [patientResult] = await pool.query(updatePatientSql, updatePatientParams);
 
-    // Find the patient history by patient_id
-    let followUpData = await followUpDb.findOne({ patient_id });
-
-    if (!followUpData) {
-      return new ApiResponse(400, "follow up not found for update", null, null);
+    if (patientResult.affectedRows === 0) {
+      // Note: This often means the patient_id wasn't found or no change was made
+      console.warn("Patient record not updated or not found:", patient_id);
     }
 
-    // Merge the existing data with the updated data
-    const updatedData = { ...followUpData.toObject(), ...updatedFollowUpData };
+    // --- 3. Update diagnosis table ---
+    // Note: This updates fields in the diagnosis table based on follow up data.
+    const updateDiagnosisSql = `
+      UPDATE diagnosis
+      SET 
+        advice = ?,
+        adviceComment = ?,
+        diagnosis = ?
+      WHERE patient_id = ?
+      LIMIT 1
+    `;
+    const updateDiagnosisParams = [
+      updatedFollowUpData.advice,
+      updatedFollowUpData.adviceComment,
+      updatedFollowUpData.diagnosis,
+      patient_id,
+    ];
+    const [diagnosisResult] = await pool.query(updateDiagnosisSql, updateDiagnosisParams);
 
-    // Ensure we are updating the correct patient and remove any unwanted field (_id)
-    delete updatedData._id; // Do not update _id
-
-    // Update the patient history record in the database
-    const updatedFollowUp = await followUpDb.findOneAndUpdate(
-      { patient_id }, // Find the patient by their unique ID
-      updatedData,
-      { new: true }, // Return the updated document
-    );
-
-    if (!updatedFollowUp) {
-      return new ApiResponse(
-        500,
-        "Error while updating the follow up.",
-        null,
-        null,
-      );
+    if (diagnosisResult.affectedRows === 0) {
+        console.warn("Diagnosis record not updated or not found:", patient_id);
     }
 
-    // Update medication history
-    const updatedPatient = await patientDb.findOneAndUpdate(
-      { patient_id },
-      {
-        $set: {
-          Uid_no: updatedFollowUpData.Uid_no || followUpData.Uid_no,
-          age: updatedFollowUpData.age || followUpData.age,
-          phone: updatedFollowUpData.phone || followUpData.phone,
-        },
-      },
-      { new: true },
-    );
+    // --- 4. Return the updated data (Re-fetch the records to ensure consistency) ---
+    const [updatedFollowUp] = await executePoolQuery(pool, followUpSql, [patient_id]);
+    const [updatedPatient] = await executePoolQuery(pool, patientSql, [patient_id]);
+    const [updatedDiagnosis] = await executePoolQuery(pool, `SELECT * FROM diagnosis WHERE patient_id = ? LIMIT 1`, [patient_id]);
 
-    if (!updatedPatient) {
-      return new ApiResponse(
-        500,
-        "Error while updating the patient.",
-        null,
-        null,
-      );
-    }
 
-    // Update discharge card (surgical history)
-    const updatedDiagnosis = await diagnosisDb.findOneAndUpdate(
-      { patient_id },
-      {
-        $set: {
-          advice: updatedFollowUpData.advice || followUpData.advice,
-          adviceComment:
-            updatedFollowUpData.adviceComment || followUpData.adviceComment,
-          diagnosis: updatedFollowUpData.diagnosis || followUpData.diagnosis,
-        },
-      },
-      { new: true },
-    );
-
-    if (!updatedDiagnosis) {
-      return new ApiResponse(
-        500,
-        "Error while updating the diagnosis.",
-        null,
-        null,
-      );
-    }
-
-    // Return the updated data response
     return new ApiResponse(
       200,
-      "follow up ,patient, diagnosis updated successfully.",
+      "Follow up, patient, and diagnosis updated successfully.",
       null,
       {
         followUp: updatedFollowUp,
@@ -126,164 +155,6 @@ async function followUp(patient_id, updatedFollowUpData) {
     );
   }
 }
-
-// async function followUp(patient_id, updatedFollowUpData) {
-//   try {
-//       console.log(`Updating patient with ID: ${patient_id}`);
-//       console.log("Data to update:", updatedFollowUpData);
-
-//       // Fetch data from all relevant databases
-//       const patientData = await patientDb.findOne({ patient_id: patient_id });
-//       const followUpData = await followUpDb.findOne({ patient_id: patient_id });
-//       const diagnosisData = await diagnosisDb.findOne({ patient_id: patient_id });
-
-//       if (!patientData && !followUpData && !diagnosisData) {
-//           console.log("Patient not found in any database.");
-//           return new ApiResponse(400, "Patient not found for update", null, null);
-//       }
-
-//       // Update fields in `patientDb`
-//       if (patientData) {
-//           const patientFieldsToUpdate = {};
-//           const patientDbFields = ["name", "Uid_no", "age", "phone", "address", "occupation", "email", "ref", "date"];
-//           patientDbFields.forEach((field) => {
-//               if (updatedFollowUpData[field]) {
-//                   patientFieldsToUpdate[field] = updatedFollowUpData[field];
-//               }
-//           });
-
-//           if (Object.keys(patientFieldsToUpdate).length > 0) {
-//               const updatedPatient = await patientDb.findOneAndUpdate(
-//                   { patient_id: patient_id },
-//                   { $set: patientFieldsToUpdate },
-//                   { new: true }
-//               );
-
-//               if (!updatedPatient) {
-//                   console.error("Failed to update patient in patientDb.");
-//                   return new ApiResponse(500, "Error while updating patient details in patientDb.", null, null);
-//               }
-//           }
-//       }
-
-//       // Update fields in `followUpDb`
-//       if (followUpData) {
-//           const followUpFieldsToUpdate = {};
-//           const followUpDbFields = ["advice", "diagnosis", "date", "ref"]; // Example fields specific to follow-up
-//           followUpDbFields.forEach((field) => {
-//               if (updatedFollowUpData[field]) {
-//                   followUpFieldsToUpdate[field] = updatedFollowUpData[field];
-//               }
-//           });
-
-//           if (Object.keys(followUpFieldsToUpdate).length > 0) {
-//               const updatedFollowUp = await followUpDb.findOneAndUpdate(
-//                   { patient_id: patient_id },
-//                   { $set: followUpFieldsToUpdate },
-//                   { new: true }
-//               );
-
-//               if (!updatedFollowUp) {
-//                   console.error("Failed to update followUpDb.");
-//                   return new ApiResponse(500, "Error while updating follow-up details in followUpDb.", null, null);
-//               }
-//           }
-//       }
-
-//       // Update fields in `diagnosisDb`
-//       if (diagnosisData) {
-//           const diagnosisFieldsToUpdate = {};
-//           const diagnosisDbFields = ["advice", "diagnosis"]; // Fields specific to diagnosis
-//           diagnosisDbFields.forEach((field) => {
-//               if (updatedFollowUpData[field]) {
-//                   diagnosisFieldsToUpdate[field] = updatedFollowUpData[field];
-//               }
-//           });
-
-//           if (Object.keys(diagnosisFieldsToUpdate).length > 0) {
-//               const updatedDiagnosis = await diagnosisDb.findOneAndUpdate(
-//                   { patient_id: patient_id },
-//                   { $set: diagnosisFieldsToUpdate },
-//                   { new: true }
-//               );
-
-//               if (!updatedDiagnosis) {
-//                   console.error("Failed to update diagnosisDb.");
-//                   return new ApiResponse(500, "Error while updating advice and diagnosis in diagnosisDb.", null, null);
-//               }
-//           }
-//       }
-
-//       return new ApiResponse(200, "Patient details updated successfully.", null, {
-//           updatedPatient,
-//           updatedFollowUpData,
-//           updatedDiagnosisData,
-//       });
-//   } catch (error) {
-//       console.error("Error while updating patient details:", error.message);
-//       return new ApiResponse(500, "Exception while updating patient details.", null, error.message);
-//   }
-// }
-
-// async function followUp(patient_id, updatedPatientData, updatedDiagnosisData, updatedSurgeryData,updatedFollowUpData) {
-//     try {
-//         const patientData = await patientDb.findOne({ patient_id });
-
-//         // if (!patientData) {
-//         //     return new ApiResponse(404, `No patient found with ID: ${patient_id}`, null, null);
-//         // }
-
-//         const diagnosisData = await diagnosisDb.findOne({ patient_id });
-
-//         // if (!diagnosisData) {
-//         //     return new ApiResponse(404, `No diagnosis found for patient ID: ${patient_id}`, null, null);
-//         // }
-
-//         const surgeryData = await surgeryDetailsDb.findOne({ patient_id });
-
-//         const followUpData= await followUpDb.findOne({patient_id});
-
-//         // if (!surgeryData) {
-//         //     return new ApiResponse(404, `No surgery details found with patient ID: ${patient_id}`, null, null);
-//         // }
-
-//         // Combine and update data
-//         const combinedData = {
-//             patient_id,
-//             Uid_no: updatedPatientData?.Uid_no || patientData.Uid_no,
-//             patientName: updatedPatientData?.patientName || patientData.name,
-//             age: updatedPatientData?.age || patientData.age,
-//             mobileNo: updatedPatientData?.mobileNo || patientData.phone,
-//             address: updatedPatientData?.address || patientData.address,
-//             occupation: updatedPatientData?.occupation || patientData.occupation,
-//             email: updatedPatientData?.email || patientData.email,
-//             reference: updatedPatientData?.reference || patientData.ref,
-//             date:updatedPatientData?.date || patientData.date,
-
-//             diagnosis: updatedDiagnosisData?.diagnosis || diagnosisData.diagnosis,
-//             advice: updatedDiagnosisData?.advice || diagnosisData.advice,
-//             present_complaints:updatedDiagnosisData?.present_complaints || diagnosisData.present_complaints,
-
-//             plan: updatedSurgeryData?.plan || surgeryData.plan,
-
-//             followup_id: updatedFollowUpData?.followup_id || followUpData.followup_id,
-
-//         };
-
-//         // Save the combined data in the followUp database
-//         await followUpDb.updateOne(
-//             { patient_id }, // Match patient_id
-//             { $set: combinedData }, // Update with combined data
-//             { upsert: true } // Insert if not already exists
-//         );
-
-//         return new ApiResponse(200, "Follow-up data updated successfully", combinedData, null);
-//     } catch (error) {
-//         console.error(`Error updating follow-up data for patient ID ${patient_id}:`, error.message);
-
-//         return new ApiResponse(500, 'Follow-up database update failed.', null, error.message);
-//     }
-// }
 
 module.exports = {
   followUp,

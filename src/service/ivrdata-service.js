@@ -1,105 +1,178 @@
 const ApiResponse = require('../utils/api-response');
-const IvrdataDb = require('../database/ivrdataDb');
-const DoctorDb = require('../database/doctorDb');
-const FdedetailsDb = require('../database/fdedetailsDb');
-const EnquiryDb = require('../database/enquiryDb');
+const moment = require("moment");
+// Removed MongoDB/Mongoose database imports
 
-async function listIvrdata(filters) {
+/**
+ * Helper function to execute a MySQL query directly on the pool.
+ * @param {object} pool - MySQL connection pool instance.
+ * @param {string} sql - SQL query string.
+ * @param {Array<any>} params - Query parameters.
+ * @returns {Promise<Array<object>>} - Query results (rows).
+ */
+async function executePoolQuery(pool, sql, params = []) {
+    const [rows] = await pool.query(sql, params);
+    return rows;
+}
+
+// -------------------------------------------------------------------------
+//                          CORE IVR OPERATIONS
+// -------------------------------------------------------------------------
+
+/**
+ * 1. List IVR Data by Date Range (Converted to MySQL)
+ */
+async function listIvrdata(pool, filters) {
     try {
         const { from, to } = filters;
         console.log("Received dates:", from, to);
 
-        const query = {};
-
+        let whereClauses = ["(is_deleted IS NULL OR is_deleted != 1)"];
+        let params = [];
+        
+        // Convert dates to YYYY-MM-DD bounds for MySQL
         if (from) {
-            query.call_date = { $gte: from };
+            const startDate = moment(from).format("YYYY-MM-DD 00:00:00");
+            whereClauses.push("call_date >= ?");
+            params.push(startDate);
         }
 
         if (to) {
-            query.call_date = query.call_date 
-                ? { ...query.call_date, $lte: to } 
-                : { $lte: to };
+            const endDate = moment(to).format("YYYY-MM-DD 23:59:59");
+            whereClauses.push("call_date <= ?");
+            params.push(endDate);
         }
+        
+        const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-        const ivrdata = await IvrdataDb.find(query);
+        const sql = `
+            SELECT * FROM ivrdata
+            ${whereString}
+            ORDER BY ivr_id DESC;
+        `;
+
+        const ivrdata = await executePoolQuery(pool, sql, params);
+        
+        console.log("Fetched IVR records:", ivrdata.length);
         return ivrdata;
     } catch (error) {
-        console.log("Error while listing IVR data:", error.message);
-        throw new Error("Unable to fetch IVR data list");
+        console.error("Error while listing IVR data:", error.message);
+        throw new Error("Unable to fetch IVR data list.");
     }
 }
 
-// Function to fetch doctor dropdown data
-async function doctorDropdown() {
+/**
+ * 2. Edit Note (Converted to MySQL)
+ */
+async function editNote(pool, ivr_id, data) {
     try {
-        return await DoctorDb.find({}, 'doctor_id name');
+        if (!ivr_id) {
+            return { success: false, message: "Invalid IVR ID." };
+        }
+
+        let noteValue;
+        // Extract note from data object
+        if (typeof data === "object" && data !== null && typeof data.note === "string") {
+            noteValue = data.note.trim();
+        } else {
+            return { success: false, message: "Note must be a valid string." };
+        }
+        
+        // Check if record exists before updating (optional but good practice)
+        const checkSql = `SELECT ivr_id FROM ivrdata WHERE ivr_id = ? LIMIT 1`;
+        const existingRecord = await executePoolQuery(pool, checkSql, [ivr_id]);
+
+        if (existingRecord.length === 0) {
+             return { success: false, message: `No record found with IVR ID ${ivr_id}.` };
+        }
+
+        // Perform update in MySQL
+        const updateSql = `
+            UPDATE ivrdata
+            SET note = ?
+            WHERE ivr_id = ?
+            LIMIT 1;
+        `;
+
+        const [updateResult] = await pool.query(updateSql, [noteValue, ivr_id]);
+
+        if (updateResult.affectedRows === 0) {
+            // This happens if the record exists but the note value was the same.
+            console.warn(`IVR ID ${ivr_id} found but no changes were made.`);
+        }
+
+        // Return success and fetch the updated record (optional)
+        const [updatedRecord] = await executePoolQuery(pool, checkSql, [ivr_id]);
+        
+        console.log("Note updated successfully for IVR ID:", ivr_id);
+        
+        return { 
+            success: true, 
+            data: updatedRecord[0], // Return the updated row
+            message: "Note updated successfully."
+        };
+
     } catch (error) {
-        console.error("Error in service layer while fetching doctor dropdown:", error.message);
+        console.error("Error while updating note:", error.message);
+        return { success: false, message: "Error updating note.", error: error.message };
+    }
+}
+
+
+// -------------------------------------------------------------------------
+//                          DROPDOWN FETCHERS
+// -------------------------------------------------------------------------
+
+/**
+ * 3. Fetch Doctor Dropdown (Converted to MySQL)
+ */
+async function doctorDropdown(pool) {
+    try {
+        const sql = `
+            SELECT doctor_id, name
+            FROM doctor
+            WHERE (is_deleted IS NULL OR is_deleted != 1)
+            ORDER BY name ASC;
+        `;
+        return await executePoolQuery(pool, sql);
+    } catch (error) {
+        console.error("Error fetching doctor dropdown:", error.message);
         throw new Error("Unable to fetch doctor dropdown.");
     }
 }
 
-// Function to fetch FDE dropdown data
-async function fdeDropdown() {
+/**
+ * 4. Fetch FDE Dropdown (Converted to MySQL)
+ */
+async function fdeDropdown(pool) {
     try {
-        return await FdedetailsDb.find({}, 'FDEID FDEName');
+        const sql = `
+            SELECT FDEID, FDEName
+            FROM fdedetails
+            WHERE (is_deleted IS NULL OR is_deleted != 1)
+            ORDER BY FDEName ASC;
+        `;
+        return await executePoolQuery(pool, sql);
     } catch (error) {
-        console.error("Error in service layer while fetching FDE dropdown:", error.message);
+        console.error("Error fetching FDE dropdown:", error.message);
         throw new Error("Unable to fetch FDE dropdown.");
     }
 }
 
-// Function to fetch enquiry dropdown data
-async function enquiryDropdown() {
+/**
+ * 5. Fetch Enquiry Dropdown (Converted to MySQL)
+ */
+async function enquiryDropdown(pool) {
     try {
-        return await EnquiryDb.find({}, 'enquiry_id enquirytype').sort({ enquiry_id: -1 });
+        const sql = `
+            SELECT enquiry_id, enquirytype
+            FROM enquiry
+            WHERE (is_deleted IS NULL OR is_deleted != 1)
+            ORDER BY enquiry_id DESC;
+        `;
+        return await executePoolQuery(pool, sql);
     } catch (error) {
-        console.error("Error in service layer while fetching enquiry dropdown:", error.message);
+        console.error("Error fetching enquiry dropdown:", error.message);
         throw new Error("Unable to fetch enquiry dropdown.");
-    }
-}
-
-async function editNote(ivr_id, data) {
-    try {
-        // Convert IVR ID to a number to match MongoDB's Int32 type
-        ivr_id = Number(ivr_id);
-        if (!ivr_id || isNaN(ivr_id)) {
-            console.log("Invalid IVR ID received:", ivr_id);
-            return { success: false, message: "Invalid IVR ID." };
-        }
-
-        console.log("Received IVR ID:", ivr_id);
-        console.log("Received Note Data:", data);
-
-        // Ensure `data` is an object and extract `note` correctly
-        if (typeof data === "object" && data !== null && typeof data.note === "string") {
-            data = data.note.trim();
-        } else {
-            console.log("Invalid note format:", data);
-            return { success: false, message: "Note must be a valid string." };
-        }
-
-        // Log MongoDB query for debugging
-        console.log("Querying MongoDB with:", { ivr_id });
-
-        // Perform update in MongoDB
-        const updatedNote = await IvrdataDb.findOneAndUpdate(
-            { ivr_id: ivr_id },  // Ensure matching by Int32
-            { $set: { note: data } }, // Update only the note field
-            { new: true }
-        );
-
-        if (!updatedNote) {
-            console.log("No record found for IVR ID:", ivr_id);
-            return { success: false, message: `No record found with IVR ID ${ivr_id}.` };
-        }
-
-        console.log("Note updated successfully:", updatedNote);
-        return { success: true, data: updatedNote };
-
-    } catch (error) {
-        console.error("Error while updating note:", error);
-        return { success: false, message: "Error updating note.", error: error.toString() };
     }
 }
 

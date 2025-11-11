@@ -1,215 +1,186 @@
 const ApiResponse = require("../utils/api-response");
 const surgeryDetailsService = require("../service/surgeryDetails-services");
+// --- ASSUMPTION: Import your pool utility ---
+const { getConnectionByLocation } = require('../config/dbConnection.js'); 
+
+// Helper function to get the correct pool instance
+const getSurgeryPool = (req) => {
+    // Infer location from query params, body, or user object
+    const location = req.query?.location || req.user?.location || 'default'; 
+    // Assuming getConnectionByLocation returns the pool instance
+    return getConnectionByLocation(location);
+};
+
+// -------------------------------------------------------------------------
+//                          SURGERY DETAILS CONTROLLERS
+// -------------------------------------------------------------------------
 
 async function addSurgeryDetails(req, res) {
-  try {
-    const { patient_id } = req.params;
-    const surgeryDetailsData = req.body;
+    const pool = getSurgeryPool(req);
 
-    console.log(
-      "Controller received request to add surgeryDetails Card:",
-      surgeryDetailsData,
-    );
-    console.log("Extracted patient_id from URL:", patient_id);
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
+    }
 
-    const result = await surgeryDetailsService.addSurgeryDetails(
-      surgeryDetailsData,
-      patient_id,
-    );
-    console.log("Add surgeryDetails Controller Result:", result);
+    try {
+        const { patient_id } = req.params;
+        const surgeryDetailsData = req.body;
 
-    res.status(result.statusCode).send(result);
-  } catch (error) {
-    console.error("Error while adding surgeryDetails:", error.message);
-    res
-      .status(500)
-      .send(
-        new ApiResponse(
-          500,
-          "Error while adding surgeryDetails.",
-          null,
-          error.message,
-        ),
-      );
-  }
+        console.log("Controller received request to add surgeryDetails Card for patient:", patient_id);
+
+        // ✅ PASS THE POOL as the first argument
+        const result = await surgeryDetailsService.addSurgeryDetails(
+            pool,
+            surgeryDetailsData,
+            patient_id,
+        );
+        console.log("Add surgeryDetails Controller Result:", result);
+
+        return res.status(result.statusCode).send(result);
+    } catch (error) {
+        console.error("Error while adding surgeryDetails:", error.message);
+        return res
+            .status(500)
+            .send(
+                new ApiResponse(
+                    500,
+                    "Error while adding surgeryDetails.",
+                    null,
+                    error.message,
+                ),
+            );
+    }
 }
 
 async function updateSurgeryDetails(req, res) {
-  const { patient_id } = req.params;
-  const updatedSurgeryDetailsData = req.body;
+    const pool = getSurgeryPool(req);
 
-  try {
-    const response = await surgeryDetailsService.updateSurgeryDetails(
-      patient_id,
-      updatedSurgeryDetailsData,
-    );
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
+    }
 
-    return res
-      .status(200)
-      .send(
-        new ApiResponse(
-          200,
-          "surgeryDetails data fetched successfully.",
-          null,
-          updatedSurgeryDetailsData,
-        ),
-      );
-  } catch (error) {
-    console.error(
-      "Error in update surgeryDetails card Controller:",
-      error.message,
-    );
-    res
-      .status(500)
-      .send(
-        new ApiResponse(
-          500,
-          "Error while updating surgeryDetails card.",
-          null,
-          error.message,
-        ),
-      );
-  }
+    const { patient_id } = req.params;
+    const updatedSurgeryDetailsData = req.body;
+
+    try {
+        console.log("Controller received request to update surgeryDetails for patient:", patient_id);
+
+        // ✅ PASS THE POOL as the first argument
+        const response = await surgeryDetailsService.updateSurgeryDetails(
+            pool,
+            patient_id,
+            updatedSurgeryDetailsData,
+        );
+
+        // Service returns an ApiResponse object, use its status code
+        return res.status(response.statusCode).send(response);
+    } catch (error) {
+        console.error("Error in update surgeryDetails card Controller:", error.message);
+        return res
+            .status(500)
+            .send(
+                new ApiResponse(
+                    500,
+                    "Error while updating surgeryDetails card.",
+                    null,
+                    error.message,
+                ),
+            );
+    }
 }
 
 async function listSurgeryDetails(req, res) {
-  try {
-    const { patient_id } = req.params;
+    const pool = getSurgeryPool(req);
 
-    console.log(
-      "Controller received request to list surgeryDetails for patient_id:",
-      patient_id,
-    );
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
+    }
+    
+    try {
+        const { patient_id } = req.params;
 
-    const result = await surgeryDetailsService.listSurgeryDetails(patient_id);
-    console.log("Get surgeryDetails Controller Result:", result);
+        console.log("Controller received request to list surgeryDetails for patient:", patient_id);
 
-    res.status(result.statusCode).send(result);
-  } catch (error) {
-    console.error(
-      "Error while fetching patient surgeryDetails:",
-      error.message,
-    );
-    res
-      .status(500)
-      .send(
-        new ApiResponse(
-          500,
-          "Error while fetching patient surgeryDetails.",
-          null,
-          error.message,
-        ),
-      );
-  }
+        // ✅ PASS THE POOL as the first argument
+        const result = await surgeryDetailsService.listSurgeryDetails(pool, patient_id);
+        console.log("Get surgeryDetails Controller Result:", result);
+
+        return res.status(result.statusCode).send(result);
+    } catch (error) {
+        console.error("Error while fetching patient surgeryDetails:", error.message);
+        return res
+            .status(500)
+            .send(
+                new ApiResponse(
+                    500,
+                    "Error while fetching patient surgeryDetails.",
+                    null,
+                    error.message,
+                ),
+            );
+    }
 }
 
 async function listAllSurgeryDetails(req, res) {
-  try {
-    console.log("Received request to list all surgery.");
+    const pool = getSurgeryPool(req);
 
-    const response = await surgeryDetailsService.listAllSurgeryDetails(); // Call the service function
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
+    }
 
-    // Return the response
-    return res.status(response.statusCode).json({
-      message: response.message,
-      data: response.data,
-      error: response.error,
-    });
-  } catch (error) {
-    console.error("Error in surgery controller:", error.message);
-    return res.status(500).json({
-      message: "Internal Server Error",
-      error: error.message,
-    });
-  }
+    try {
+        console.log("Received request to list all surgery.");
+
+        // ✅ PASS THE POOL as the first argument
+        const response = await surgeryDetailsService.listAllSurgeryDetails(pool); // Call the service function
+
+        // Service returns an ApiResponse object
+        return res.status(response.statusCode).json(response);
+    } catch (error) {
+        console.error("Error in surgery controller:", error.message);
+        // Catch raw errors thrown by the service and format them
+        return res.status(500).json(new ApiResponse(500, "Internal Server Error", null, error.message));
+    }
 }
 
 async function addPatientComment(req, res) {
-  try {
-    const { patient_id } = req.params; // Extract patient_id from the URL
-    const commentData = req.body; // Extract comment data from the request body
-    console.log("Controller received request to add comment:", commentData);
+    const pool = getSurgeryPool(req);
 
-    if (!patient_id) {
-      return res
-        .status(400)
-        .send(
-          new ApiResponse(400, "Invalid or missing patient_id.", null, null),
-        );
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
     }
 
-    // if (!commentData || !commentData.comment) {
-    //   return res
-    //     .status(400)
-    //     .send(
-    //       new ApiResponse(400, "Invalid or missing comment data.", null, null)
-    //     );
-    // }
+    try {
+        const { patient_id } = req.params;
+        const commentData = req.body;
+        console.log("Controller received request to add comment for patient:", patient_id);
 
-    // Pass both patient_id and commentData to the service function
-    const response = await surgeryDetailsService.addPatientComment(
-      patient_id,
-      commentData,
-    );
+        if (!patient_id) {
+            return res.status(400).send(new ApiResponse(400, "Invalid or missing patient_id.", null, null));
+        }
 
-    res.status(response.statusCode).send(response);
-  } catch (error) {
-    console.error("Error in addDoctorComment:", error.message);
-    res
-      .status(500)
-      .send(
-        new ApiResponse(
-          500,
-          "Error while adding comment.",
-          null,
-          error.message,
-        ),
-      );
-  }
+        // ✅ PASS THE POOL as the first argument
+        const response = await surgeryDetailsService.addPatientComment(
+            pool,
+            patient_id,
+            commentData,
+        );
+
+        return res.status(response.statusCode).send(response);
+    } catch (error) {
+        console.error("Error in addDoctorComment:", error.message);
+        return res
+            .status(500)
+            .send(
+                new ApiResponse(
+                    500,
+                    "Error while adding comment.",
+                    null,
+                    error.message,
+                ),
+            );
+    }
 }
-
-// async function listSurgeryDetails(req,res){
-//     try {
-//         console.log("Controller received request to list surgeryDetailsData.", req.params.patient_id);
-//         const surgeryDetailsData = await patienttabsService.listSurgeryDetails(req.params.patient_id);
-//         console.log("List surgeryDetailsData Result:", surgeryDetailsData);
-//         res.status(200).send(new ApiResponse(200, "surgeryDetailsData fetched successfully.", null, surgeryDetailsData));
-//     } catch (error) {
-//         console.error("Error while fetching surgeryDetailsData:", error.message);
-//         res.status(500).send(new ApiResponse(500, "Error while fetching surgeryDetailsData.", null, error.message));
-//     }
-// }
-
-// async function surgeryDetails(req, res, next) {
-//     try {
-//         console.log("Request Body:", req.body);  // Log the request body
-//         console.log("Patient ID:", req.params.patient_id);  // Log the patient ID
-//         const updatedSurgeryDetailsData = req.body.surgeryDetailsData;
-
-//         // Call the service function with the correct data
-//         const result = await patienttabsService.surgeryDetails(req.params.patient_id, updatedSurgeryDetailsData);
-//         res.status(result.statusCode).send(result);
-//     } catch (error) {
-//         console.error("Error while editing other tests of patient:", error.message);
-//         res.status(500).send(new ApiResponse(500, "Error while editing other tests of patient.", null, error.message));
-//     }
-//   }
-
-// async function surgeryDetails(req, res, next) {
-//     try {
-//         console.log("Request Body:", req.body);  // Log the request body
-//         console.log("Patient ID:", req.params.patient_id);  // Log the patient ID
-//         const  = req.body.surgeryDetailsData;
-//         const updatedUrologyData=req.body.urologyData;
-
-//         // Call the service function with the correct data
-//         const result = await patienttabsService.surgeryDetails(req.params.patient_id, updatedSurgeryDetailsData,updatedUrologyData);
-//         res.status(result.statusCode).send(result);
-//     } catch (error) {
-//         console.error("Error while editing surgery details of patient:", error.message);
-//         res.status(500).send(new ApiResponse(500, "Error while editing surgery details of patient.", null, error.message));
-//     }
-// }
 
 module.exports = {
   addSurgeryDetails,

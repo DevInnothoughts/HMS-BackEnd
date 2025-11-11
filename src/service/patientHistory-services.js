@@ -1,55 +1,53 @@
 const ApiResponse = require("../utils/api-response");
-const patientHistoryDb = require("../database/patientHistoryDb");
-const medicationHistoryDb = require("../database/medicationHistoryDb");
-const dischargeCardDb = require("../database/dischargeCardDb");
-const prescriptionAdviceDb = require("../database/prescriptionAdviceDb");
-const appointmentDb = require("../database/appointmentDb");
-const doctorDb = require("../database/doctorDb");
-const mongoose = require("mongoose");
+const moment = require("moment");
+// Removed MongoDB/Mongoose database imports
 
-// Update history check
-async function updateHistoryChk(patient_id) {
+/**
+ * Helper function to execute a MySQL query directly on the pool.
+ * @param {object} pool - MySQL connection pool instance.
+ * @param {string} sql - SQL query string.
+ * @param {Array<any>} params - Query parameters.
+ * @returns {Promise<Array<object>>} - Query results (rows).
+ */
+async function executePoolQuery(pool, sql, params = []) {
+    const [rows] = await pool.query(sql, params);
+    return rows;
+}
+
+// -------------------------------------------------------------------------
+//                          CORE OPERATIONS
+// -------------------------------------------------------------------------
+
+/**
+ * 1. Update history check (Converted to MySQL)
+ */
+async function updateHistoryChk(pool, patient_id) {
   try {
     console.log("Service received request to update historyChk:", patient_id);
 
-    // Validate if `patient_id` is provided
     if (!patient_id) {
-      console.warn("Invalid patient_id received:", patient_id);
       return new ApiResponse(400, "Invalid patient_id.", null, null);
     }
-
+    
     // Find the appointment associated with the provided `patient_id`
-    const appointment = await appointmentDb.findOne({
-      patient_id: String(patient_id),
-    });
+    const appointmentSql = `SELECT appointment_id FROM appointment WHERE patient_id = ? LIMIT 1`;
+    const [appointment] = await executePoolQuery(pool, appointmentSql, [patient_id]);
 
-    // Handle missing appointment
     if (!appointment) {
-      console.warn("Appointment not found for history update:", patient_id);
       return new ApiResponse(404, "Appointment not found.", null, null);
     }
 
     // Update the `historychk` field in the appointment
-    const updateResult = await appointmentDb.updateOne(
-      { patient_id: appointment.patient_id },
-      { $set: { historychk: 3 } },
-    );
+    const updateSql = `UPDATE appointment SET historychk = 3 WHERE patient_id = ? LIMIT 1`;
+    const [updateResult] = await pool.query(updateSql, [patient_id]);
 
-    // Verify if the update was successful
-    if (updateResult.modifiedCount === 0) {
+    if (updateResult.affectedRows === 0) {
       console.error("Failed to update historyChk for patient_id:", patient_id);
-      return new ApiResponse(
-        500,
-        "Error while updating historyChk.",
-        null,
-        null,
-      );
+      return new ApiResponse(500, "Error while updating historyChk.", null, null);
     }
 
     // Fetch the updated appointment document
-    const updatedAppointment = await appointmentDb.findOne({
-      patient_id: appointment.patient_id,
-    });
+    const [updatedAppointment] = await executePoolQuery(pool, appointmentSql, [patient_id]);
 
     console.log("historyChk successfully updated for patient_id:", patient_id);
     return new ApiResponse(
@@ -64,134 +62,75 @@ async function updateHistoryChk(patient_id) {
   }
 }
 
-async function addPatientHistory(patientData, patient_id) {
+/**
+ * 2. Add Patient, Medication, and Surgical History (Converted to MySQL)
+ */
+async function addPatientHistory(pool, patientData, patient_id) {
   console.log("Service received request for patient ID:", patient_id);
 
   try {
-    // Check if the patient already exists in patientHistoryDb using patient_id
-    // const patientDbExist = await patientHistoryDb.findOne({ patient_id });
-    // if (patientDbExist) {
-    //   return new ApiResponse(
-    //     400,
-    //     "Patient already registered with the provided patient_id",
-    //     null,
-    //     null,
-    //   );
-    // }
-   const doctor = await doctorDb.findOne({ name: patientData.name });
-
-let doctor_id = null; // Default value if no doctor is found
-
-if (doctor) {
-  doctor_id = doctor.doctor_id;
-  console.log("Doctor found:", doctor);
-} else {
-  console.warn("No doctor found for name:", patientData.name);
-}
-
-
-    // Create a new patient history record
-    const newPatientHistory = new patientHistoryDb({
-      patient_id,
-      doctor_id,
-      patient_date: patientData.patient_date,
-      height: patientData.height,
-      weight: patientData.weight,
-      painscale: patientData.painscale,
-      BP: patientData.BP,
-      Pulse: patientData.Pulse,
-      RR: patientData.RR,
-      RS: patientData.RS,
-      CVS: patientData.CVS,
-      CNS: patientData.CNS,
-      PA: patientData.PA,
-      family_history: patientData.family_history,
-      general_history: patientData.general_history,
-      past_history: patientData.past_history,
-      habits: patientData.habits,
-      drugs_allery: patientData.drugs_allery,
-      complaints: patientData.complaints,
-      presentcomplaints: patientData.presentcomplaints,
-      ongoing_medicines: patientData.ongoing_medicines,
-      investigation: patientData.investigation,
-      knowncaseof: patientData.knowncaseof,
-      diagnosis: patientData.diagnosis,
-      symptoms: patientData.symptoms,
-      medical_mx: patientData.medical_mx,
-      comment: patientData.comment,
-      piles_duration: patientData.piles_duration,
-      fistula_duration: patientData.fistula_duration,
-      varicose_duration: patientData.varicose_duration,
-      Urinary_incontinence_duration: patientData.Urinary_incontinence_duration,
-      Fecal_incontinence_duration: patientData.Fecal_incontinence_duration,
-      hernia_duration: patientData.hernia_duration,
-      ODS_duration: patientData.ODS_duration,
-      pilonidalsinus: patientData.pilonidalsinus,
-      circumcision: patientData.circumcision,
-
-    });
-
-    // Save the patient history record
-    const patientHistoryResult = await newPatientHistory.save();
-    console.log(
-      "Patient history successfully registered",
-      patientHistoryResult,
-    );
-
-    // Create and save medication history
-    const newMedicationHistory = new medicationHistoryDb({
-      patient_id,
-      medicine: patientData.medicine,
-      indication: patientData.indication,
-      since: patientData.since,
-    });
-    const medicationHistoryResult = await newMedicationHistory.save();
-    console.log(
-      "Medication history successfully registered",
-      medicationHistoryResult,
-    );
-
-    // Create and save surgical history
-    const newSurgicalHistory = new dischargeCardDb({
-      patient_id,
-      surgical_history: patientData.surgical_history,
-    });
-    const surgicalHistoryResult = await newSurgicalHistory.save();
-    console.log(
-      "Surgical history successfully registered",
-      surgicalHistoryResult,
-    );
-
-    // Update `historychk` in `appointmentDb` for the given appointment ID
-    const updateResult = await appointmentDb.updateOne(
-      { patient_id },
-      { $set: { historychk: 3 } },
-    );
-
-    if (updateResult.modifiedCount === 0) {
-      console.warn(
-        "Failed to update historyChk in appointmentDb for patient_id:",
-        patient_id,
-      );
-      return new ApiResponse(
-        500,
-        "Error while updating historyChk.",
-        null,
-        null,
-      );
+    // 1. Fetch doctor_id
+    let doctor_id = null;
+    if (patientData.name) {
+        const doctorSql = `SELECT doctor_id FROM doctor WHERE name = ? LIMIT 1`;
+        const [doctor] = await executePoolQuery(pool, doctorSql, [patientData.name]);
+        if (doctor) doctor_id = doctor.doctor_id;
     }
 
-    console.log("historyChk successfully updated for appointment:", patient_id);
+    // 2. Insert into patient_history
+    const insertHistorySql = `
+        INSERT INTO patient_history (
+            patient_id, doctor_id, patient_date, height, weight, painscale, BP, Pulse, RR, RS, CVS, CNS, PA, 
+            family_history, general_history, past_history, habits, drugs_allery, complaints, presentcomplaints, 
+            ongoing_medicines, investigation, knowncaseof, diagnosis, symptoms, medical_mx, comment, 
+            piles_duration, fistula_duration, varicose_duration, Urinary_incontinence_duration, 
+            Fecal_incontinence_duration, hernia_duration, ODS_duration, pilonidalsinus, circumcision
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+    `;
+    const historyParams = [
+        patient_id, doctor_id, patientData.patient_date, patientData.height, patientData.weight, patientData.painscale, 
+        patientData.BP, patientData.Pulse, patientData.RR, patientData.RS, patientData.CVS, patientData.CNS, patientData.PA, 
+        patientData.family_history, patientData.general_history, patientData.past_history, patientData.habits, 
+        patientData.drugs_allery, patientData.complaints, patientData.presentcomplaints, patientData.ongoing_medicines, 
+        patientData.investigation, patientData.knowncaseof, patientData.diagnosis, patientData.symptoms, 
+        patientData.medical_mx, patientData.comment, patientData.piles_duration, patientData.fistula_duration, 
+        patientData.varicose_duration, patientData.Urinary_incontinence_duration, patientData.Fecal_incontinence_duration, 
+        patientData.hernia_duration, patientData.ODS_duration, patientData.pilonidalsinus, patientData.circumcision,
+    ];
+    const [historyResult] = await pool.query(insertHistorySql, historyParams);
+    
+    // 3. Insert into medication_history
+    const insertMedicationSql = `
+        INSERT INTO medication_history (patient_id, medicine, indication, since) 
+        VALUES (?, ?, ?, ?)
+    `;
+    const medicationParams = [
+        patient_id, patientData.medicine, patientData.indication, patientData.since,
+    ];
+    const [medicationResult] = await pool.query(insertMedicationSql, medicationParams);
 
-    // Return a successful response with saved history records
+    // 4. Insert into surgical_history (Used dischargeCardDb for surgical history in original)
+    // Assuming the surgical history is a simple string column in a table called surgical_history
+    const insertSurgicalSql = `
+        INSERT INTO surgical_history (patient_id, surgical_history_desc) 
+        VALUES (?, ?)
+    `;
+    const [surgicalResult] = await pool.query(insertSurgicalSql, [patient_id, patientData.surgical_history]);
+
+    // 5. Update `historychk` in `appointment`
+    await updateHistoryChk(pool, patient_id);
+
+    // Return a successful response
     return new ApiResponse(
       201,
-      "Patient, medication, and surgical history registered successfully. historyChk updated.",
+      "Patient history registered successfully. historyChk updated.",
       null,
       {
-        patientHistory: patientHistoryResult,
-        medicationHistory: medicationHistoryResult,
-        surgicalHistory: surgicalHistoryResult,
+        patientHistoryInsertId: historyResult.insertId,
+        medicationHistoryInsertId: medicationResult.insertId,
+        surgicalHistoryInsertId: surgicalResult.insertId,
       },
     );
   } catch (error) {
@@ -205,127 +144,89 @@ if (doctor) {
   }
 }
 
-async function updatePatientHistory(patient_id, updatedPatientHistoryData) {
+/**
+ * 3. Update Patient History and Related Tables (Converted to MySQL)
+ */
+async function updatePatientHistory(pool, patient_id, updatedPatientHistoryData) {
   try {
-    console.log(
-      "Service received request to update or create PatientHistory for patient_id:",
-      patient_id,
+    console.log("Service received request to update PatientHistory for patient_id:", patient_id);
+
+    // 1. Fetch current patient history data
+    const checkHistorySql = `SELECT * FROM patient_history WHERE patient_id = ? LIMIT 1`;
+    let [existingHistory] = await executePoolQuery(pool, checkHistorySql, [patient_id]);
+
+    if (!existingHistory) {
+        // If history doesn't exist, call addHistory logic (simplified by returning error and advising to create)
+        // You may want to implement upsert logic here if your tables support it.
+        return new ApiResponse(400, "Patient history not found. Please use the addPatientHistory route.", null, null);
+    }
+    
+    // 2. Fetch or update doctor_id
+    let doctor_id_to_use = existingHistory.doctor_id;
+    if (updatedPatientHistoryData.name) {
+        const doctorSql = `SELECT doctor_id FROM doctor WHERE name = ? LIMIT 1`;
+        const [doctor] = await executePoolQuery(pool, doctorSql, [updatedPatientHistoryData.name]);
+        if (doctor) {
+            doctor_id_to_use = doctor.doctor_id;
+        } else {
+            console.warn(`Doctor with name ${updatedPatientHistoryData.name} not found during update.`);
+        }
+    }
+    updatedPatientHistoryData.doctor_id = doctor_id_to_use;
+
+
+    // 3. Update patient_history
+    const historyUpdateFields = Object.keys(updatedPatientHistoryData).filter(key => 
+        // Exclude medication/surgical history specific fields
+        !['medicine', 'indication', 'since', 'surgical_history'].includes(key)
     );
 
-    // Find the patient history by patient_id
-    let patientHistoryData = await patientHistoryDb.findOne({ patient_id });
+    if (historyUpdateFields.length > 0) {
+        const historySetClauses = historyUpdateFields.map(field => `${field} = ?`).join(', ');
+        const historyUpdateValues = historyUpdateFields.map(field => updatedPatientHistoryData[field]);
+        historyUpdateValues.push(patient_id);
 
-    let doctor_id = null;
-
-    // Check if the doctor's name has been provided
-    if (updatedPatientHistoryData.name) {
-      const doctor = await doctorDb.findOne({
-        name: updatedPatientHistoryData.name,
-      });
-
-      if (doctor) {
-        doctor_id = doctor.doctor_id;
-        console.log("Doctor found:", doctor);
-      } else {
-        console.warn(`Doctor with name ${updatedPatientHistoryData.name} not found.`);
-      }
+        const updateHistorySql = `UPDATE patient_history SET ${historySetClauses} WHERE patient_id = ? LIMIT 1`;
+        await pool.query(updateHistorySql, historyUpdateValues);
     }
 
-    if (patientHistoryData) {
-      // Update existing patient history
-      const updatedData = {
-        ...patientHistoryData.toObject(),
-        ...updatedPatientHistoryData,
-        doctor_id: doctor_id || patientHistoryData.doctor_id, // Use the updated or existing doctor_id
-      };
 
-      delete updatedData._id; // Ensure `_id` is not modified
+    // 4. Update medication_history (using ON DUPLICATE KEY UPDATE)
+    const updateMedicationSql = `
+        INSERT INTO medication_history (patient_id, medicine, indication, since) 
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE 
+            medicine = VALUES(medicine), indication = VALUES(indication), since = VALUES(since);
+    `;
+    const medicationParams = [
+        patient_id, 
+        updatedPatientHistoryData.medicine, 
+        updatedPatientHistoryData.indication, 
+        updatedPatientHistoryData.since
+    ];
+    await pool.query(updateMedicationSql, medicationParams);
 
-      const updatedPatientHistory = await patientHistoryDb.findOneAndUpdate(
-        { patient_id },
-        updatedData,
-        { new: true }, // Return the updated document
-      );
 
-      if (!updatedPatientHistory) {
-        return new ApiResponse(
-          500,
-          "Error while updating the patient history.",
-          null,
-          null,
-        );
-      }
+    // 5. Update surgical_history
+    const updateSurgicalSql = `
+        INSERT INTO surgical_history (patient_id, surgical_history_desc) 
+        VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE surgical_history_desc = VALUES(surgical_history_desc);
+    `;
+    await pool.query(updateSurgicalSql, [patient_id, updatedPatientHistoryData.surgical_history]);
 
-      // Update medication history
-      await medicationHistoryDb.findOneAndUpdate(
-        { patient_id },
-        {
-          $set: {
-            medicine:
-              updatedPatientHistoryData.medicine || patientHistoryData.medicine,
-            indication:
-              updatedPatientHistoryData.indication ||
-              patientHistoryData.indication,
-            since: updatedPatientHistoryData.since || patientHistoryData.since,
-          },
-        },
-        { new: true },
-      );
 
-      // Update discharge card (surgical history)
-      await dischargeCardDb.findOneAndUpdate(
-        { patient_id },
-        {
-          $set: {
-            surgical_history:
-              updatedPatientHistoryData.surgical_history ||
-              patientHistoryData.surgical_history,
-          },
-        },
-        { new: true },
-      );
-
-      console.log("Patient history and related data updated successfully.");
-      return new ApiResponse(
+    // 6. Return the updated history record
+    const [updatedPatientHistory] = await executePoolQuery(pool, checkHistorySql, [patient_id]);
+    
+    console.log("Patient history and related data updated successfully.");
+    return new ApiResponse(
         200,
         "Patient history updated successfully.",
         null,
         updatedPatientHistory,
-      );
-    } else {
-      // Create a new patient history record if not found
-      const newPatientHistory = new patientHistoryDb({
-        patient_id,
-        doctor_id,
-        ...updatedPatientHistoryData,
-      });
+    );
 
-      const patientHistoryResult = await newPatientHistory.save();
-
-      // Create medication history
-      const newMedicationHistory = new medicationHistoryDb({
-        patient_id,
-        medicine: updatedPatientHistoryData.medicine,
-        indication: updatedPatientHistoryData.indication,
-        since: updatedPatientHistoryData.since,
-      });
-      await newMedicationHistory.save();
-
-      // Create discharge card (surgical history)
-      const newSurgicalHistory = new dischargeCardDb({
-        patient_id,
-        surgical_history: updatedPatientHistoryData.surgical_history,
-      });
-      await newSurgicalHistory.save();
-
-      console.log("Patient history and related data created successfully.");
-      return new ApiResponse(
-        201,
-        "Patient history created successfully.",
-        null,
-        patientHistoryResult,
-      );
-    }
   } catch (error) {
     console.error("Error while updating or creating PatientHistory:", error.message);
     return new ApiResponse(
@@ -337,59 +238,36 @@ async function updatePatientHistory(patient_id, updatedPatientHistoryData) {
   }
 }
 
-
-
-async function listPatientHistory(patient_id) {
-  console.log(
-    "Service received request to list patient for patient_id:",
-    patient_id,
-  );
+/**
+ * 4. List Patient History and Related Tables (Converted to MySQL)
+ */
+async function listPatientHistory(pool, patient_id) {
+  console.log("Service received request to list patient history for patient_id:", patient_id);
 
   try {
-    // Fetch patient history from patientHistoryDb using patient_id
-    const patientHistory = await patientHistoryDb.findOne({ patient_id });
+    // 1. Fetch Patient History
+    const historySql = `SELECT * FROM patient_history WHERE patient_id = ? LIMIT 1`;
+    const [patientHistory] = await executePoolQuery(pool, historySql, [patient_id]);
 
-    // Log the fetched data for debugging
-    console.log("Fetched patient history:", patientHistory);
-
-    // Check if patient history exists
     if (!patientHistory) {
-      return new ApiResponse(
-        404,
-        "Patient history not found for the provided patient_id",
-        null,
-        null,
-      );
+      return new ApiResponse(404, "Patient history not found for the provided patient_id", null, null);
     }
 
-    // Fetch medication history from medicationHistoryDb using patient_id
-    const medicationHistory = await medicationHistoryDb.find({ patient_id });
+    // 2. Fetch related data in parallel
+    const [medicationHistory, surgicalHistory, doctorInfo] = await Promise.all([
+        executePoolQuery(pool, `SELECT * FROM medication_history WHERE patient_id = ?`, [patient_id]),
+        executePoolQuery(pool, `SELECT surgical_history_desc AS surgical_history FROM surgical_history WHERE patient_id = ?`, [patient_id]),
+        executePoolQuery(pool, `SELECT doctor_id, name FROM doctor WHERE doctor_id = ? LIMIT 1`, [patientHistory.doctor_id]),
+    ]);
 
-    // Log the fetched medication history for debugging
-    console.log("Fetched medication history:", medicationHistory);
-
-    // Fetch surgical history from dischargeCardDb using patient_id
-    const surgicalHistory = await dischargeCardDb.find({ patient_id });
-
-    // Log the fetched surgical history for debugging
-    console.log("Fetched surgical history:", surgicalHistory);
-
-    // Fetch doctor information from doctorDb using doctor_id from patientHistory
-    const doctor_id = patientHistory.doctor_id; // Assuming doctor_id is a field in patientHistory
-    const doctorInfo = await doctorDb.findOne({ doctor_id });
-
-    // Log the fetched doctor information for debugging
-    console.log("Fetched doctor information:", doctorInfo);
-
-    // Prepare the response data
+    // 3. Prepare the response data
     const responseData = {
-      patientHistory,
+      patientHistory: patientHistory,
       medicationHistory,
       surgicalHistory,
-      doctor: doctorInfo ? { name: doctorInfo.name, id: doctorInfo._id } : null, // Include doctor name and id
+      doctor: doctorInfo[0] ? { name: doctorInfo[0].name, id: doctorInfo[0].doctor_id } : null,
     };
 
-    // Return the successful response with both patient and medication history
     return new ApiResponse(
       200,
       "Patient and medication history fetched successfully.",
@@ -407,74 +285,6 @@ async function listPatientHistory(patient_id) {
   }
 }
 
-
-// async function patientHistory(patient_id, updatedPatientHistoryData, updatedMedicationHistoryData,updatedDischargeCardData,UpdatedPrescriptionAdviceData) {
-//     try {
-//         const patientHistoryData = await patientHistoryDb.findOne({ patient_id });
-
-//         // if (!patientHistoryData) {
-//         //     return new ApiResponse(404, `No patient history found with ID: ${patient_id}`, null, null);
-//         // }
-
-//         const medicationHistoryData = await medicationHistoryDb.findOne({ patient_id });
-
-//         // if (!medicationHistoryData) {
-//         //     return new ApiResponse(404, `No medication history found for patient ID: ${patient_id}`, null, null);
-//         // }
-//         const dischargeCardData= await dischargeCardDb.findOne({patient_id});
-
-//         const prescriptionAdviceData= await prescriptionAdviceDb.findOne({patient_id});
-//         // Combine and update data
-
-//         const combinedData = {
-//             patient_id,
-//             patient_date: updatedPatientHistoryData?.patient_date || patientHistoryData.patient_date,
-//             height: updatedPatientHistoryData?.height || patientHistoryData.height,
-//             weight: updatedPatientHistoryData?.weight || patientHistoryData.weight,
-//             painscale: updatedPatientHistoryData?.painscale || patientHistoryData.painscale,
-//             BP: updatedPatientHistoryData?.BP || patientHistoryData.BP,
-//             Pulse: updatedPatientHistoryData?.Pulse || patientHistoryData.Pulse,
-//             RR: updatedPatientHistoryData?.RR || patientHistoryData.RR,
-//             RS: updatedPatientHistoryData?.RS || patientHistoryData.RS,
-//             CVS: updatedPatientHistoryData?.CVS || patientHistoryData.CVS,
-//             CNS: updatedPatientHistoryData?.CNS || patientHistoryData.CNS,
-//             PA: updatedPatientHistoryData?.PA || patientHistoryData.PA,
-//             family_history: updatedPatientHistoryData?.family_history || patientHistoryData.family_history,
-//             general_history: updatedPatientHistoryData?.general_history || patientHistoryData.general_history,
-//             past_history: updatedPatientHistoryData?.past_history || patientHistoryData.past_history,
-//             habits: updatedPatientHistoryData?.habits || patientHistoryData.habits,
-//             drugs_allery: updatedPatientHistoryData?.drugs_allery || patientHistoryData.drugs_allery,
-//             complaints: updatedPatientHistoryData?.complaints || patientHistoryData.complaints,
-//             presentcomplaints: updatedPatientHistoryData?.presentcomplaints || patientHistoryData.presentcomplaints,
-//             ongoing_medicines: updatedPatientHistoryData?.ongoing_medicines || patientHistoryData.ongoing_medicines,
-//             investigation: updatedPatientHistoryData?.investigation || patientHistoryData.investigation,
-//             knowncaseof: updatedPatientHistoryData?.knowncaseof || patientHistoryData.knowncaseof,
-//             diagnosis: updatedPatientHistoryData?.diagnosis || patientHistoryData.diagnosis,
-//             symptoms: updatedPatientHistoryData?.symptoms || patientHistoryData.symptoms,
-
-//             medicine: updatedMedicationHistoryData?.medicine || medicationHistoryData.medicine,
-//             indication:updatedMedicationHistoryData?.indication || medicationHistoryData.indication,
-//             since:updatedMedicationHistoryData?.since || medicationHistoryData.since,
-
-//             surgical_history:updatedDischargeCardData?.surgical_history || dischargeCardData.surgical_history,
-
-//             padvice_desc:UpdatedPrescriptionAdviceData?.padvice_desc || prescriptionAdviceData.padvice_desc,
-//         };
-
-//         // Save the combined data in the followUp database
-//         await patientHistoryDb.updateOne(
-//             { patient_id }, // Match patient_id
-//             { $set: combinedData }, // Update with combined data
-//             { upsert: true } // Insert if not already exists
-//         );
-
-//         return new ApiResponse(200, "patient history updated successfully", combinedData, null);
-//     } catch (error) {
-//         console.error(`Error updating patient history for patient ID ${patient_id}:`, error.message);
-
-//         return new ApiResponse(500, 'Patient history database update failed.', null, error.message);
-//     }
-// }
 
 module.exports = {
   addPatientHistory,

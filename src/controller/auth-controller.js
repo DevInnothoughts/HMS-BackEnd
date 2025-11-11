@@ -1,5 +1,5 @@
-const Authservice = require('../service/auth-service');
-const ApiResponse = require('../utils/api-response');
+const AuthService = require("../service/auth-service");
+const ApiResponse = require("../utils/api-response");
 
 async function login(req, res, next) {
         try {

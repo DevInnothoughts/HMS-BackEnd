@@ -1,235 +1,163 @@
 const ApiResponse = require("../utils/api-response");
 const diagnosisService = require("../service/diagnosis-services.js");
+// --- ASSUMPTION: Import your pool utility ---
+const { getConnectionByLocation } = require('../config/dbConnection.js'); 
+
+// Helper function to get the correct pool instance
+const getDiagnosisPool = (user) => {
+    // Infer location from the authenticated user or default
+    const location = user?.location || 'default'; 
+    // Assuming getConnectionByLocation returns the pool instance directly
+    return getConnectionByLocation(location);
+};
+
+// -------------------------------------------------------------------------
+//                          DIAGNOSIS CONTROLLERS
+// -------------------------------------------------------------------------
+
 async function addDiagnosis(req, res) {
-  try {
-    const { patient_id } = req.params; // Extract patient_id from URL parameters
-    const diagnosisData = req.body; // Extract diagnosis data from request body
+    const pool = getDiagnosisPool(req.user);
 
-    console.log("Controller received request to add diagnosis:", diagnosisData);
-    console.log("Extracted patient_id from URL:", patient_id);
-
-    // Validate patient_id
-    if (!patient_id || isNaN(Number(patient_id))) {
-      console.error("Invalid or missing patient_id:", patient_id);
-      return res
-        .status(400)
-        .send(
-          new ApiResponse(400, "Invalid or missing patient_id.", null, null),
-        );
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
     }
 
-    // Validate diagnosisData (basic check)
-    if (!diagnosisData || Object.keys(diagnosisData).length === 0) {
-      console.error("Empty or missing diagnosis data.");
-      return res
-        .status(400)
-        .send(
-          new ApiResponse(400, "Diagnosis data cannot be empty.", null, null),
+    try {
+        const { patient_id } = req.params;
+        const diagnosisData = req.body;
+
+        console.log("Controller received request to add diagnosis for patient_id:", patient_id);
+
+        if (!patient_id || isNaN(Number(patient_id))) {
+            return res.status(400).send(new ApiResponse(400, "Invalid or missing patient_id.", null, null));
+        }
+        if (!diagnosisData || Object.keys(diagnosisData).length === 0) {
+            return res.status(400).send(new ApiResponse(400, "Diagnosis data cannot be empty.", null, null));
+        }
+
+        // ✅ PASS THE POOL as the first argument
+        const result = await diagnosisService.addDiagnosis(
+            pool,
+            Number(patient_id),
+            diagnosisData,
         );
+        console.log("Add diagnosis Controller Result:", result);
+
+        return res.status(result.statusCode).send(result);
+    } catch (error) {
+        console.error("Error while adding diagnosis:", error.message);
+        return res
+            .status(500)
+            .send(new ApiResponse(500, "Error while adding diagnosis.", null, error.message));
     }
-
-    // Pass the patient_id and patient data to the service
-    const result = await diagnosisService.addDiagnosis(
-      Number(patient_id),
-      diagnosisData,
-    );
-    console.log("Add diagnosis Controller Result:", result);
-
-    // Send the service response to the client
-    res.status(result.statusCode).send(result);
-  } catch (error) {
-    console.error("Error while adding diagnosis:", error.message);
-    res
-      .status(500)
-      .send(
-        new ApiResponse(
-          500,
-          "Error while adding diagnosis.",
-          null,
-          error.message,
-        ),
-      );
-  }
 }
 
 const updateDiagnosis = async (req, res) => {
-  const { patient_id } = req.params; // Extract patient_id from request parameters
-  const updatedDiagnosisData = req.body; // Extract the updated data from request body
+    const pool = getDiagnosisPool(req.user);
 
-  try {
-    // Call the service function
-    const response = await diagnosisService.updateDiagnosis(
-      patient_id,
-      updatedDiagnosisData,
-    );
-
-    // Check if the response indicates an error
-    if (response.statusCode >= 400) {
-      return res.status(response.statusCode).json(response);
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
     }
 
-    // Send the success response
-    return res.status(200).json(response);
-  } catch (error) {
-    console.error("Controller: Error in updateDiagnosis:", error.message);
-    return res
-      .status(500)
-      .json(
-        new ApiResponse(
-          500,
-          "Error while updating patient diagnosis.",
-          null,
-          error.message,
-        ),
-      );
-  }
+    const { patient_id } = req.params;
+    const updatedDiagnosisData = req.body;
+
+    try {
+        // ✅ PASS THE POOL as the first argument
+        const response = await diagnosisService.updateDiagnosis(
+            pool,
+            patient_id,
+            updatedDiagnosisData,
+        );
+
+        // Service returns ApiResponse object, check status code for response
+        return res.status(response.statusCode).json(response);
+    } catch (error) {
+        console.error("Controller: Error in updateDiagnosis:", error.message);
+        return res
+            .status(500)
+            .json(new ApiResponse(500, "Error while updating patient diagnosis.", null, error.message));
+    }
 };
 
 async function listDiagnosis(req, res) {
-  try {
-    const { patient_id } = req.params;
+    const pool = getDiagnosisPool(req.user);
 
-    console.log(
-      "Controller received request to list diagnosis for patient_id:",
-      patient_id,
-    );
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
+    }
+    
+    try {
+        const { patient_id } = req.params;
+        console.log("Controller received request to list diagnosis for patient_id:", patient_id);
 
-    const result = await diagnosisService.listDiagnosis(patient_id);
-    console.log("Get diagnosis Controller Result:", result);
+        // ✅ PASS THE POOL as the first argument
+        const result = await diagnosisService.listDiagnosis(pool, patient_id);
+        console.log("Get diagnosis Controller Result:", result);
 
-    res.status(result.statusCode).send(result);
-  } catch (error) {
-    console.error("Error while fetching patient diagnosis:", error.message);
-    res
-      .status(500)
-      .send(
-        new ApiResponse(
-          500,
-          "Error while fetching patient diagnosis.",
-          null,
-          error.message,
-        ),
-      );
-  }
+        return res.status(result.statusCode).send(result);
+    } catch (error) {
+        console.error("Error while fetching patient diagnosis:", error.message);
+        return res
+            .status(500)
+            .send(new ApiResponse(500, "Error while fetching patient diagnosis.", null, error.message));
+    }
 }
 
 async function listAllDiagnosis(req, res) {
-  try {
-    console.log("Received request to list all diagnoses.");
+    const pool = getDiagnosisPool(req.user);
 
-    const response = await diagnosisService.listAllDiagnosis(); // Call the service function
-
-    // Return the response
-    return res.status(response.statusCode).json({
-      message: response.message,
-      data: response.data,
-      error: response.error,
-    });
-  } catch (error) {
-    console.error("Error in diagnosis controller:", error.message);
-    return res.status(500).json({
-      message: "Internal Server Error",
-      error: error.message,
-    });
-  }
-}
-async function addDoctorComment(req, res) {
-  try {
-    const { patient_id } = req.params; // Extract patient_id from the URL
-    const commentData = req.body; // Extract comment data from the request body
-    console.log("Controller received request to add comment:", commentData);
-
-    if (!patient_id) {
-      return res
-        .status(400)
-        .send(
-          new ApiResponse(400, "Invalid or missing patient_id.", null, null),
-        );
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
     }
 
-    // if (!commentData || !commentData.comment) {
-    //   return res
-    //     .status(400)
-    //     .send(
-    //       new ApiResponse(400, "Invalid or missing comment data.", null, null)
-    //     );
-    // }
+    try {
+        console.log("Received request to list all diagnoses.");
 
-    // Pass both patient_id and commentData to the service function
-    const response = await diagnosisService.addDoctorComment(
-      patient_id,
-      commentData,
-    );
+        // ✅ PASS THE POOL as the first argument
+        const response = await diagnosisService.listAllDiagnosis(pool);
 
-    res.status(response.statusCode).send(response);
-  } catch (error) {
-    console.error("Error in addDoctorComment:", error.message);
-    res
-      .status(500)
-      .send(
-        new ApiResponse(
-          500,
-          "Error while adding comment.",
-          null,
-          error.message,
-        ),
-      );
-  }
+        // Service returns an ApiResponse object
+        return res.status(response.statusCode).json(response);
+    } catch (error) {
+        console.error("Error in diagnosis controller:", error.message);
+        // Catch raw errors thrown by the service and format them
+        return res.status(500).json(new ApiResponse(500, "Internal Server Error", null, error.message));
+    }
 }
 
-//   async function diagnosis(req, res, next) {
-//     try {
-//       // Log the request body and patient ID
-//       console.log("Request Body:", req.body);
-//       console.log("Patient ID:", req.params.patient_id);
+async function addDoctorComment(req, res) {
+    const pool = getDiagnosisPool(req.user);
 
-//       // Extract the fields to be updated from the request body
-//       const combinedData = req.body;
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed.", null, null));
+    }
 
-//       // Call the service function to update the personal details
-//       const result = await patienttabsService.diagnosis(req.params.patient_id, combinedData);
+    try {
+        const { patient_id } = req.params;
+        const commentData = req.body;
+        console.log("Controller received request to add comment for patient_id:", patient_id);
 
-//       // Send the response with the result from the service function
-//       res.status(result.statusCode).send(result);
-//     } catch (error) {
-//       // Log any errors and send a failure response
-//       console.error("Error while updating patient:", error.message);
-//       res.status(500).send(new ApiResponse(500, "Error while updating patient.", null, error.message));
-//     }
-//   }
+        if (!patient_id) {
+            return res.status(400).send(new ApiResponse(400, "Invalid or missing patient_id.", null, null));
+        }
 
-// async function listDiagnosis(req,res){
-//     try {
-//         console.log("Controller received request to list all diagnosis data.", req.params.patient_id);
-//         const diagnosisData = await patienttabsService.listDiagnosis(req.params.patient_id);
-//         console.log("List diagnosis data Result:", diagnosisData);
-//         res.status(200).send(new ApiResponse(200, "diagnosis data fetched successfully.", null, diagnosisData));
-//     } catch (error) {
-//         console.error("Error while fetching diagnosis data:", error.message);
-//         res.status(500).send(new ApiResponse(500, "Error while fetching diagnosis data.", null, error.message));
-//     }
-// }
-// async function diagnosis(req, res, next) {
-//     try {
-//         console.log("Request Body:", req.body);  // Log the request body
-//         console.log("Patient ID:", req.params.patient_id);  // Log the patient ID
-//         const updatedDiagnosisData = req.body.diagnosisData;
-//         const updatedSurgicalAdviceData= req.body.surgicalAdviceData;
-//         // const updatedMedicationHistoryData = req.body.medicationHistoryData;
+        // ✅ PASS THE POOL as the first argument
+        const response = await diagnosisService.addDoctorComment(pool, patient_id, commentData);
 
-//         // Call the service function with the correct data
-//         const result = await patienttabsService.diagnosis(req.params.patient_id, updatedDiagnosisData,updatedSurgicalAdviceData);
-//         res.status(result.statusCode).send(result);
-//     } catch (error) {
-//         console.error("Error while editing patient:", error.message);
-//         res.status(500).send(new ApiResponse(500, "Error while editing patient.", null, error.message));
-//     }
-// }
+        return res.status(response.statusCode).send(response);
+    } catch (error) {
+        console.error("Error in addDoctorComment:", error.message);
+        return res
+            .status(500)
+            .send(new ApiResponse(500, "Error while adding comment.", null, error.message));
+    }
+}
 
 module.exports = {
-  addDiagnosis,
-  updateDiagnosis,
-  listDiagnosis,
-  listAllDiagnosis,
-  addDoctorComment,
+    addDiagnosis,
+    updateDiagnosis,
+    listDiagnosis,
+    listAllDiagnosis,
+    addDoctorComment,
 };

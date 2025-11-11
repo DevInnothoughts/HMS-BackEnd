@@ -1,6 +1,18 @@
 const ApiResponse = require("../utils/api-response");
 const AppointmentService = require("../service/appointment-services");
 
+// Define the formatPhoneNumber function (kept for clarity in controller logic)
+function formatPhoneNumber(phoneNumber) {
+  if (phoneNumber && typeof phoneNumber === "string") {
+    return phoneNumber.replace(/\D/g, ""); // Remove non-digit characters
+  }
+  return ""; // Return empty string if invalid
+}
+
+// -------------------------------------------------------------------------
+//                         APPOINTMENT CONTROLLERS
+// -------------------------------------------------------------------------
+
 // Add a new appointment
 async function addAppointment(req, res, next) {
   try {
@@ -8,6 +20,7 @@ async function addAppointment(req, res, next) {
       "Controller received request to add appointment:",
       req.body.phone
     );
+    // The service handles location inference from req.body.patient_location or req.user
     const result = await AppointmentService.addAppointment(req.body, req.user);
     return res.status(result.statusCode).send(result);
   } catch (error) {
@@ -24,15 +37,8 @@ async function addAppointment(req, res, next) {
       );
   }
 }
-// Define the formatPhoneNumber function
-function formatPhoneNumber(phoneNumber) {
-  if (phoneNumber && typeof phoneNumber === "string") {
-    return phoneNumber.replace(/\D/g, ""); // Remove non-digit characters
-  }
-  return ""; // Return empty string if invalid
-}
 
-// Your editAppointment function
+// Edit Appointment
 async function editAppointment(req, res, next) {
   try {
     console.log("Incoming request to edit appointment");
@@ -43,7 +49,6 @@ async function editAppointment(req, res, next) {
       req.body.patient_phone;
 
     if (!patient_phone) {
-      console.log(" Error: Phone number is missing or invalid");
       return res
         .status(400)
         .json(
@@ -57,10 +62,7 @@ async function editAppointment(req, res, next) {
     }
 
     const formattedPhone = formatPhoneNumber(patient_phone);
-
-    // Check if the phone number is valid after formatting
     if (!formattedPhone) {
-      console.log(" Error: Invalid phone number format");
       return res
         .status(400)
         .json(
@@ -73,12 +75,7 @@ async function editAppointment(req, res, next) {
         );
     }
 
-    console.log(
-      "🔹 Calling AppointmentService.editAppointment for phone number:",
-      formattedPhone
-    );
-
-    // Assuming the rest of your code is correct
+    // Call service. The service handles location inference from req.body.patient_location or req.user
     const result = await AppointmentService.editAppointment(
       formattedPhone,
       req.body,
@@ -102,30 +99,11 @@ async function editAppointment(req, res, next) {
   }
 }
 
-// // List all appointments
-// async function listAppointments(req, res, next) {
-//     try {
-//         console.log("Controller received request to list all appointments.");
-//         console.log("Received Query Params:", req.query); // Debugging
-
-//         // Pass req.query instead of undefined queryParams
-//         const appointments = await AppointmentService.listAppointments(req.query);
-
-//         console.log("✅ List Appointments result:", appointments.length, "records found.");
-//         res.status(200).send(new ApiResponse(200, "Appointment list fetched successfully", null, appointments));
-//     } catch (error) {
-//         console.error("❌ Error while fetching appointments:", error.message);
-//         res.status(500).send(new ApiResponse(500, "Error while fetching appointments.", null, error.message));
-//     }
-// }
-
+// List all appointments
 async function listAppointments(req, res, next) {
   try {
     console.log("Controller received request to list all appointments.");
-    console.log("Raw Query Params:", req.query); // Debugging
-
-    // Ensure `from` and `to` are correctly extracted
-    const { from, to, location } = req.query;
+    const { from, to, location } = req.query; // ✅ Extract location
 
     if (!from || !to) {
       console.error("❌ Error: Missing 'from' or 'to' date in query params.");
@@ -141,7 +119,7 @@ async function listAppointments(req, res, next) {
         );
     }
 
-    // Call service with correctly extracted params
+    // ✅ Pass all query parameters including location
     const appointments = await AppointmentService.listAppointments({
       from,
       to,
@@ -181,12 +159,14 @@ async function listAppointments(req, res, next) {
 // Confirm an appointment
 async function confirmAppointment(req, res) {
   try {
-    const { appId, location } = req.query;
+    const { appId, location } = req.query; // ✅ Extract location
     console.log("Controller received request to confirm appointment:", appId);
     if (!appId)
       return res
         .status(400)
         .send(new ApiResponse(400, "Appointment ID is required.", null, null));
+        
+    // ✅ Pass location to the service layer
     const result = await AppointmentService.confirmAppointment(appId, location);
     return res.status(result.statusCode).send(result);
   } catch (error) {
@@ -204,19 +184,29 @@ async function confirmAppointment(req, res) {
   }
 }
 
+// -------------------------------------------------------------------------
+//                         DROPDOWN CONTROLLERS
+// -------------------------------------------------------------------------
+
 // Fetch doctor dropdown
 async function doctorDropdown(req, res, next) {
   try {
     console.log("Controller received request to fetch doctor dropdown");
-    const data = await AppointmentService.doctorDropdown(req.query.location);
+    const { location } = req.query; // ✅ Extract location
+    const data = await AppointmentService.doctorDropdown(location); // ✅ Pass location
+
+    const doctors = Array.isArray(data) ? data : [];
+
     return res
-      .status(data.length ? 200 : 404)
+      .status(doctors.length ? 200 : 404)
       .send(
         new ApiResponse(
-          200,
-          "Doctor dropdown fetched successfully.",
+          doctors.length ? 200 : 404,
+          doctors.length
+            ? "Doctor dropdown fetched successfully."
+            : "No doctors found.",
           null,
-          data
+          doctors
         )
       );
   } catch (error) {
@@ -234,19 +224,24 @@ async function doctorDropdown(req, res, next) {
   }
 }
 
+
 // Fetch consultation dropdown
 async function consultationDropdown(req, res, next) {
   try {
     console.log("Controller received request to fetch consultation dropdown");
-    const data = await AppointmentService.consultationDropdown();
+    const { location } = req.query; // ✅ Extract location
+    const data = await AppointmentService.consultationDropdown(location); // ✅ Pass location
+
+    const consultations = Array.isArray(data) ? data : [];
+
     return res
-      .status(data.length ? 200 : 404)
+      .status(consultations.length ? 200 : 404)
       .send(
         new ApiResponse(
           200,
           "Consultation dropdown fetched successfully.",
           null,
-          data
+          consultations
         )
       );
   } catch (error) {
@@ -268,7 +263,9 @@ async function consultationDropdown(req, res, next) {
 async function fdeDropdown(req, res, next) {
   try {
     console.log("Controller received request to fetch FDE dropdown");
-    const data = await AppointmentService.fdeDropdown(req.query.location);
+    const { location } = req.query; // ✅ Extract location
+    const data = await AppointmentService.fdeDropdown(location); // ✅ Pass location
+
     return res
       .status(data.length ? 200 : 404)
       .send(
@@ -293,7 +290,9 @@ async function fdeDropdown(req, res, next) {
 async function departmentDropdown(req, res, next) {
   try {
     console.log("Controller received request to fetch department dropdown");
-    const data = await AppointmentService.departmentDropdown();
+    const { location } = req.query; // ✅ Extract location
+    const data = await AppointmentService.departmentDropdown(location); // ✅ Pass location
+
     return res
       .status(data.length ? 200 : 404)
       .send(
@@ -319,11 +318,13 @@ async function departmentDropdown(req, res, next) {
   }
 }
 
-// Fetch department dropdown
+// Fetch treatment dropdown
 async function treatmentDropdown(req, res, next) {
   try {
     console.log("Controller received request to fetch treatment dropdown");
-    const data = await AppointmentService.treatmentDropdown();
+    const { location } = req.query; // ✅ Extract location
+    const data = await AppointmentService.treatmentDropdown(location); // ✅ Pass location
+
     return res
       .status(data.length ? 200 : 404)
       .send(
@@ -349,15 +350,21 @@ async function treatmentDropdown(req, res, next) {
   }
 }
 
-// Update historyChk flag when history button is clicked
+// -------------------------------------------------------------------------
+//                         PROCESS FLAG CONTROLLERS
+// -------------------------------------------------------------------------
+
+// Update historyChk flag
 async function updateHistoryChk(req, res) {
   try {
-    const { appId, location } = req.query;
+    const { appId, location } = req.query; // ✅ Extract location
     console.log("Controller received request to update historyChk:", appId);
     if (!appId)
       return res
         .status(400)
         .send(new ApiResponse(400, "Appointment ID is required.", null, null));
+        
+    // ✅ Pass location
     const result = await AppointmentService.updateHistoryChk(appId, location);
     return res.status(result.statusCode).send(result);
   } catch (error) {
@@ -375,15 +382,17 @@ async function updateHistoryChk(req, res) {
   }
 }
 
-// Update executionChk flag when execution button is clicked
+// Update executionChk flag
 async function updateExecutionChk(req, res) {
   try {
-    const { appId, location } = req.query;
+    const { appId, location } = req.query; // ✅ Extract location
     console.log("Controller received request to update executionChk:", appId);
     if (!appId)
       return res
         .status(400)
         .send(new ApiResponse(400, "Appointment ID is required.", null, null));
+        
+    // ✅ Pass location
     const result = await AppointmentService.updateExecutionChk(appId, location);
     return res.status(result.statusCode).send(result);
   } catch (error) {
@@ -401,10 +410,11 @@ async function updateExecutionChk(req, res) {
   }
 }
 
-// Update executionChk to 4 when button is clicked
+// Update executionChk to 4
 async function updateExecutionChkToFour(req, res) {
   try {
     const { appointment_id } = req.params;
+    const location = req.query.location || req.user.location; // Infer location
     console.log(
       "Controller received request to update executionChk to 4:",
       appointment_id
@@ -413,8 +423,10 @@ async function updateExecutionChkToFour(req, res) {
       return res
         .status(400)
         .send(new ApiResponse(400, "Appointment ID is required.", null, null));
+        
+    // ✅ Pass location
     const result =
-      await AppointmentService.updateExecutionChkToFour(appointment_id);
+      await AppointmentService.updateExecutionChkToFour(appointment_id, location);
     return res.status(result.statusCode).send(result);
   } catch (error) {
     console.error("Error while updating executionChk to 4:", error.message);
@@ -431,10 +443,10 @@ async function updateExecutionChkToFour(req, res) {
   }
 }
 
-// Update consultationChk flag when consultation button is clicked
+// Update consultationChk flag
 async function updateConsultationChk(req, res) {
   try {
-    const { appId, location } = req.query;
+    const { appId, location } = req.query; // ✅ Extract location
     console.log(
       "Controller received request to update consultationChk:",
       appId
@@ -443,6 +455,8 @@ async function updateConsultationChk(req, res) {
       return res
         .status(400)
         .send(new ApiResponse(400, "Appointment ID is required.", null, null));
+        
+    // ✅ Pass location
     const result = await AppointmentService.updateConsultationChk(
       appId,
       location
@@ -463,10 +477,17 @@ async function updateConsultationChk(req, res) {
   }
 }
 
+// -------------------------------------------------------------------------
+//                         RECEIPT/PATIENT CONTROLLERS
+// -------------------------------------------------------------------------
+
 async function saveReceipt(req, res, next) {
   try {
     console.log("Controller received request to save receipt:", req.body);
-    const result = await AppointmentService.saveReceipt(req.body, req.user);
+    const location = req.query.location || req.user.location; // Infer location
+    
+    // ✅ Pass location explicitly
+    const result = await AppointmentService.saveReceipt(req.body, location); 
     console.log("Save Receipt Controller Result:", result);
     res.status(result.statusCode).send(result);
   } catch (error) {
@@ -481,7 +502,7 @@ async function saveReceipt(req, res, next) {
 
 async function getPatientByMobile(req, res, next) {
   try {
-    const { patient_phone } = req.query;
+    const { patient_phone, location } = req.query; // ✅ Extract location
 
     if (!patient_phone) {
       return res
@@ -493,7 +514,8 @@ async function getPatientByMobile(req, res, next) {
       "Controller received request to fetch patient by mobile number:",
       patient_phone
     );
-    const result = await AppointmentService.getPatientByMobile(patient_phone);
+    // ✅ Pass location explicitly
+    const result = await AppointmentService.getPatientByMobile(patient_phone, location);
 
     console.log("Get Patient By Mobile Controller Result:", result);
     res.status(result.statusCode).send(result);
@@ -514,12 +536,14 @@ async function getPatientByMobile(req, res, next) {
       );
   }
 }
+
 async function listReceipt(req, res) {
   try {
-    console.log("Controller received request to list receipts:", req.body);
+    console.log("Controller received request to list receipts:", req.query);
+    const { location } = req.query; // ✅ Extract location
 
-    // ✅ Call the function correctly
-    const result = await AppointmentService.listReceipt(req.body, req.user);
+    // ✅ Pass both query params and location
+    const result = await AppointmentService.listReceipt(req.query, location); 
 
     console.log("List Receipt Controller Result:", result);
     res.status(result.statusCode).send(result);
@@ -541,7 +565,9 @@ async function listReceipt(req, res) {
 // Function to delete an appointment
 async function deleteAppointment(req, res) {
   try {
-    const { appointment_id } = req.params; // Get appointment ID from request parameters
+    const { appointment_id } = req.params;
+    const location = req.query.location || req.user.location; // Infer location
+    
     console.log(
       "Controller received request to delete appointment:",
       appointment_id
@@ -553,25 +579,11 @@ async function deleteAppointment(req, res) {
         .send(new ApiResponse(400, "Appointment ID is required.", null, null));
     }
 
-    // Call the service to mark the appointment as deleted
-    const result = await AppointmentService.deleteAppointment(appointment_id);
+    // ✅ Pass location
+    const result = await AppointmentService.deleteAppointment(appointment_id, location);
 
-    if (result) {
-      return res
-        .status(200)
-        .send(
-          new ApiResponse(
-            200,
-            "Appointment marked as deleted successfully.",
-            null,
-            null
-          )
-        );
-    } else {
-      return res
-        .status(404)
-        .send(new ApiResponse(404, "Appointment not found.", null, null));
-    }
+    // The service now returns an ApiResponse object, handle it consistently
+    return res.status(result.statusCode).send(result);
   } catch (error) {
     console.error("Error while deleting appointment:", error.message);
     return res

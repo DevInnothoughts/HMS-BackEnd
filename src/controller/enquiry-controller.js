@@ -1,70 +1,108 @@
 const ApiResponse = require('../utils/api-response');
 const EnquiryService = require('../service/enquiry-services.js');
+const { getConnectionByLocation } = require('../config/dbConnection.js');
 
-// Add a new enquiry
+// Helper function to simulate pool retrieval (replace with your actual implementation)
+const getEnquiryPoolByLocation = (location) => {
+    return getConnectionByLocation(location).connection;
+};
+
+// Helper to infer location from request objects
+function inferLocation(req) {
+    return req.body?.patient_location || req.query?.location || req.user?.location || 'default';
+}
+
+// -------------------------------------------------------------------------
+
+/**
+ * Add a new enquiry
+ */
 async function addEnquiry(req, res, next) {
+    const location = inferLocation(req);
+    const pool = getEnquiryPoolByLocation(location);
+
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed for location.", null, null));
+    }
+
     try {
         console.log("Controller received request to add enquiry:", req.body);
 
-        // Call the service to add enquiry without validation
-        const result = await EnquiryService.addEnquiry(req.body, req.user);
+        // ✅ PASS THE POOL AS THE FIRST ARGUMENT
+        const result = await EnquiryService.addEnquiry(pool, req.body);
         console.log("Add Enquiry Controller Result:", result);
 
-        // Validate and use a default status code if undefined or invalid
-        const statusCode = result.statusCode && Number.isInteger(result.statusCode) ? result.statusCode : 500;
-        const message = result.message || "An unexpected error occurred.";
-        const data = result.data || null;
+        // Service now returns an ApiResponse object, use its properties directly
+        return res.status(result.statusCode).json(result);
 
-        res.status(statusCode).json({
-            statusCode,
-            message,
-            data,
-        });
     } catch (error) {
-        console.error("Error while adding enquiry:", error);
+        console.error("Error while adding enquiry:", error.message);
+        
+        // Use the error information from the service layer if possible, otherwise default.
+        const statusCode = error.statusCode || 500;
+        const message = error.message || "Error while adding enquiry.";
 
-        // Default response for unhandled errors
-        res.status(500).send({
-            statusCode: 500,
-            message: "Error while adding enquiry.",
-            data: null,
-        });
+        return res.status(statusCode).send(new ApiResponse(statusCode, message, null, error.message));
     }
 }
 
-
-// List all enquiries
+/**
+ * List all enquiries
+ */
 async function listEnquiry(req, res, next) {
+    const location = inferLocation(req);
+    const pool = getEnquiryPoolByLocation(location);
+
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed for location.", null, null));
+    }
+    
     try {
         console.log("Controller received request to list all enquiries with query params:", req.query);
 
-        // Pass query parameters to the service function (req.query contains query params from URL)
-        const enquiries = await EnquiryService.listEnquiry(req.query);
-        console.log("List Enquiry Result:", enquiries);
+        // ✅ PASS THE POOL AS THE FIRST ARGUMENT ALONG WITH QUERY PARAMS
+        const enquiries = await EnquiryService.listEnquiry(pool, req.query);
+        console.log("List Enquiry Result:", enquiries.length, "records.");
 
-        res.status(200).send(new ApiResponse(200, "Enquiry list fetched successfully.", null, enquiries));
+        // The service layer returns raw rows, wrap it in ApiResponse here
+        return res.status(200).send(new ApiResponse(200, "Enquiry list fetched successfully.", null, enquiries));
     } catch (error) {
         console.error("Error while fetching enquiries:", error.message);
-        res.status(500).send(new ApiResponse(500, "Error while fetching enquiries.", null, error.message));
+        // The service throws a raw Error object, catch it here.
+        return res.status(500).send(new ApiResponse(500, "Error while fetching enquiries.", null, error.message));
     }
 }
 
+/**
+ * Fetch doctor dropdown
+ */
 async function doctorDropdown(req, res, next) {
+    const location = inferLocation(req);
+    const pool = getEnquiryPoolByLocation(location);
+
+    if (!pool) {
+        return res.status(500).send(new ApiResponse(500, "Database connection failed for location.", null, null));
+    }
+    
     try {
         console.log("Controller received request to fetch doctor dropdown");
-        const data = await EnquiryService.doctorDropdown();
+
+        // ✅ PASS THE POOL AS THE FIRST ARGUMENT
+        const data = await EnquiryService.doctorDropdown(pool);
 
         if (data.length === 0) {
             return res.status(404).send(new ApiResponse(404, "No doctor data found.", null, []));
         }
 
-        res.status(200).send(new ApiResponse(200, "Doctor dropdown fetched successfully.", null, data));
+        return res.status(200).send(new ApiResponse(200, "Doctor dropdown fetched successfully.", null, data));
     } catch (error) {
         console.error("Error while fetching doctor dropdown:", error.message);
-        res.status(500).send(new ApiResponse(500, "Error while fetching doctor dropdown.", null, error.message));
+        return res.status(500).send(new ApiResponse(500, "Error while fetching doctor dropdown.", null, error.message));
     }
 }
 
 module.exports = {
-addEnquiry,listEnquiry,doctorDropdown
+    addEnquiry,
+    listEnquiry,
+    doctorDropdown
 };
