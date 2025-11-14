@@ -42,11 +42,22 @@ async function listEnquiry(queryParams) {
 
     console.log("Converted Date Range:", fromDate, toDate);
 
-    const filter = {
-      date: { $gte: fromDate, $lte: toDate }
-    };
+    // 2. Define the SQL query with necessary joins
+    const sql = `
+        SELECT 
+            e.*,
+            d.name AS doctorName
+        FROM appointment_enquiry e 
+        LEFT JOIN doctor d ON e.doctor_id = d.doctor_id 
+        WHERE 
+            e.date BETWEEN ? AND ?
+            AND (e.is_deleted IS NULL OR e.is_deleted != 1)
+        ORDER BY e.date DESC;
+    `;
+    const params = [fromDate, toDate];
 
-    const enquiries = await enquiryDb.find(filter);
+    // 3. Execute query
+    const enquiries = await executePoolQuery(pool, sql, params);
     
     console.log("Enquiry Results:", enquiries);
 

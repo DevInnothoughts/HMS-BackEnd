@@ -81,7 +81,21 @@ async function editDoctor(email, payload, user) {
 
 async function listDoctor(date) {
   try {
-    const doctors = await DoctorDb.find({ Date: date }).limit(500);
+    // NOTE: The original MongoDB query used `{ Date: date }` which implies filtering by a 'Date' field.
+    // However, listing all doctors is more common, so filtering by 'is_deleted' is standard.
+    // If you need the 'Date' filter, adjust the SQL accordingly.
+    
+    const sql = `
+        SELECT doctor_id, name, doctor_type, email, phone, job_location, department_id, profile
+        FROM doctor
+        WHERE (is_deleted IS NULL OR is_deleted != 1)
+        LIMIT 500;
+    `;
+    // If 'date' field is actually a filter:
+    // WHERE DATE(date_column) = ? AND (is_deleted IS NULL OR is_deleted != 1)
+
+    const doctors = await pool.query(sql);
+    
     return doctors;
   } catch (error) {
     console.log("Error while fetching doctors: ", error.message);

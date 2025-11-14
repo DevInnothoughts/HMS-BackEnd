@@ -51,7 +51,7 @@ async function editDoctor(req, res, next) {
 async function listDoctor(req, res, next) {
   try {
     console.log("Controller received request to list all doctors.");
-    const doctors = await AdminService.listDoctor();
+    const doctors = await AdminService.listDoctor(req.pool);
     console.log("List Doctors Result:", doctors);
     res
       .status(200)

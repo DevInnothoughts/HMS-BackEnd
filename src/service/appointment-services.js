@@ -300,14 +300,14 @@ async function listAppointments({ from, to, location }) {
         }
 
         const sql = `
-         SELECT 
-          ap.*, 
+         SELECT
+          ap.*,
           p.name AS patient_name,
           d.name AS doctor_name
         FROM appointment ap
         LEFT JOIN patient p ON ap.patient_id = p.patient_id
         LEFT JOIN doctor d ON ap.doctor_id = d.doctor_id
-        WHERE 
+        WHERE
           ap.appointment_timestamp BETWEEN ? AND ?
           AND (ap.is_deleted IS NULL OR ap.is_deleted != 1)
         ORDER BY ap.appointment_id DESC;
