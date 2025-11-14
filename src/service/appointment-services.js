@@ -265,10 +265,6 @@ async function editAppointment(patient_phone, updateData, user) {
     );
   }
 }
-
-const uri =
-  "mongodb+srv://latkarmuskan16:JyD7bl4xulV9VBhl@cluster0.ffvwr.mongodb.net/hmsDPRoadDb"; // Replace with your MongoDB URI
-
 /**
  * 4. List Appointments
  */
@@ -1019,12 +1015,6 @@ async function updateExecutionChkToFour(appointment_id, location) {
   }
 }
 
-// Add a new receipt
-async function saveReceipt(receiptData) {
-  console.log("Initial request received:", receiptData);
-/**
- * 14. Save Receipt
- */
 async function saveReceipt(receiptData, location) {
     console.log("Initial receipt request received:", receiptData);
 
@@ -1402,80 +1392,6 @@ async function listReceipt(queryParams, location) {
     );
   }
 }
-
-// async function deleteAppointment(appointment_id) {
-//   try {
-//     console.log("Service received request to mark appointment as deleted:", appointment_id);
-
-//     let appointment;
-//     if (mongoose.Types.ObjectId.isValid(appointment_id)) {
-//       appointment = await appointmentDb.findOne({ _id: new mongoose.Types.ObjectId(appointment_id) });
-//     } else {
-//       appointment = await appointmentDb.findOne({ appointment_id: String(appointment_id) });
-//     }
-
-//     if (!appointment) {
-//       console.warn("Appointment not found for ID:", appointment_id);
-//       return new ApiResponse(404, "Appointment not found.", null, null);
-//     }
-
-//     // Update the is_deleted flag
-//     appointment.is_deleted = 1; // Mark as deleted
-//     await appointment.save(); // Save the changes
-
-//     console.log("Appointment marked as deleted successfully:", appointment_id);
-//     return new ApiResponse(200, "Appointment marked as deleted successfully.", null, null);
-//   } catch (error) {
-//     console.error("Error while marking appointment as deleted:", error);
-//     return new ApiResponse(500, "Internal server error.", null, error.message);
-//   }
-// }
-async function deleteAppointment(appointment_id) {
-  try {
-    console.log(
-      "Service received request to mark appointment as deleted:",
-      appointment_id
-    );
-
-    let appointment;
-    if (mongoose.Types.ObjectId.isValid(appointment_id)) {
-      appointment = await appointmentDb.findOne({
-        $or: [
-          { _id: new mongoose.Types.ObjectId(appointment_id) },
-          { appointment_id: String(appointment_id) },
-        ],
-      });
-    } else {
-      appointment = await appointmentDb.findOne({
-        appointment_id: String(appointment_id),
-      });
-    }
-
-    if (!appointment) {
-      console.warn("Appointment not found for ID:", appointment_id);
-      return new ApiResponse(404, "Appointment not found.", null, null);
-    }
-
-    console.log("Before update, is_deleted:", appointment.is_deleted);
-
-    // Update the is_deleted flag using updateOne
-    const updateResult = await appointmentDb.updateOne(
-      { _id: appointment._id },
-      { $set: { is_deleted: 1 } }
-    );
-
-    if (updateResult.modifiedCount === 0) {
-      console.warn(
-        "Appointment was not updated. Possible issue:",
-        updateResult
-      );
-      return new ApiResponse(
-        500,
-        "Failed to mark appointment as deleted.",
-        null,
-        null
-      );
-    }
 /**
  * 17. Delete Appointment (Mark as deleted)
  */
